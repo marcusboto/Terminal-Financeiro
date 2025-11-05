@@ -1,38 +1,13 @@
-C:\Users\Marcus\Documents\Projetos\terminal_financeiro
-pwrshell: .\venv\Scripts\Activate.ps1
- 
- streamlit terminal : (venv) PS C:\Users\Marcus\Documentos\Projetos\terminal_financeiro> python -m streamlit run terminal.py --server.address 127.0.0.1 --server.port 8889
+Entre na pasta do projeto:
+        cd C:\Users\Marcus\Documents\GitHub\Terminal-Financeiro
+
+Verifique e Puxe as Últimas Alterações: (Isto garante que a versão local é a mesma que você acabou de subir para o GitHub)
+        git pull origin master
+
+Ative o Ambiente Virtual:
+        .\venv\Scripts\Activate.ps1
+        (se erro, execute: Set-ExecutionPolicy RemoteSigned -Scope Process e dps volte para a linha 8)
 
 
-
-------------------------------
-.\venv\Scripts\Activate.ps1
-python -m streamlit run terminal.py --server.address 127.0.0.1 --server.port 8889
-
-
-
-
--------------
-
-
-
-
-CONCEITOS: 
-
-#SMA 
-
-Médias Móveis Simples (SMA)
-
-médias móveis comuns: uma de curto prazo (20 dias) e uma de médio prazo (50 dias).
-
-python -m streamlit run terminal.py --server.address 127.0.0.1 --server.port 8889
-
-
-################################
-cd na pasta
-
-
-
-C:\Users\Marcus\Documents\Projetos\terminal_financeiro
-
-python terminal_desktop.py
+Execute o Código:
+        python terminal_desktop.py
