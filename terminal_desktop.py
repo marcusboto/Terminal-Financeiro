@@ -1,5 +1,5 @@
 # ==========================================================
-# 1. IMPORTS (FINAL CONSOLIDADO PARA PyQt5)
+# 1. IMPORTS (FINAL CONSOLIDADO PARA PyQt5 + Matplotlib)
 # ==========================================================
 import sys
 import pandas as pd
@@ -7,6 +7,10 @@ import yfinance as yf
 import requests
 from datetime import date
 import time
+# Imports Matplotlib NATIVOS
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+import matplotlib.dates as mdates
 
 # 💡 MÓDULOS PyQt5 (INTERFACE GRÁFICA)
 from PyQt5.QtWidgets import (
@@ -24,10 +28,7 @@ from PyQt5.QtGui import (
     QFont, QPalette, QColor, QBrush, 
     QIntValidator 
 )
-from PyQt5.QtWebEngineWidgets import QWebEngineView 
-# CORREÇÃO: QWebEngineSettings reside em PyQt5.QtWebEngineWidgets (em vez de QtWebEngineCore)
-from PyQt5.QtWebEngineWidgets import QWebEngineSettings 
-import plotly.graph_objects as go 
+# REMOVIDOS: PyQtWebEngine e Plotly.js!
 
 # ==========================================================
 # 2. VARIÁVEIS GLOBAIS (SINTAXE CORRIGIDA - REMOVIDO U+00A0)
@@ -45,7 +46,7 @@ TICKERS_CRYPTO = ["BTC-USD", "ETH-USD", "SOL-USD", "ADA-USD", "XRP-USD", "DOGE-U
 TICKERS_COMMODITIES = ["CL=F", "GC=F", "SI=F", "KC=F", "NG=F"] 
 TICKER_CDI = "BNDX" 
 
-# SUAS Chaves de API (CORRIGIDO: Sintaxe limpa)
+# SUAS Chaves de API (Sintaxe limpa)
 ALPHA_VANTAGE_KEY = "32KLQPTJOM2PCM6A" 
 NEWS_API_KEY = "422d1eea07014251afa314afec0e6e41" 
 
@@ -100,7 +101,6 @@ def _fetch_yfinance_with_retry(fetch_fn, retries=3, delay=1, *args, **kwargs):
                 time.sleep(delay)
             else:
                 print(f"ERRO CRÍTICO yfinance: Falhou após {retries} tentativas. {e}")
-                # Não levanta a exceção, retorna None para a função chamadora lidar
                 return None
     return None
 
@@ -295,8 +295,79 @@ def _buscar_e_combinar_dados_ativo(ticker, data_inicio):
 
 
 # ==========================================================
-# 4. WIDGETS PERSONALIZADOS
+# 4. WIDGETS PERSONALIZADOS (MATPLOTLIB)
 # ==========================================================
+
+# NOVO WIDGET: MatplotlibCanvas para desenhar o gráfico
+class MatplotlibWidget(QWidget):
+    """
+    Widget nativo para renderização de gráficos Matplotlib dentro do PyQt.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # 1. Configura a figura (área de desenho)
+        plt.style.use('dark_background')
+        self.fig, self.ax = plt.subplots(facecolor='#1A1A1A') # Cor de fundo da figura
+        self.canvas = FigureCanvas(self.fig)
+        
+        # 2. Configura o layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.addWidget(self.canvas)
+        
+        # Configurações iniciais do eixo (para ter certeza que o tema escuro se aplica)
+        self.ax.tick_params(colors='white')
+        self.ax.xaxis.label.set_color('white')
+        self.ax.yaxis.label.set_color('white')
+        self.ax.title.set_color('white')
+        self.ax.set_facecolor('#1A1A1A') # Cor do painel do gráfico
+        self.ax.spines['bottom'].set_color('#333333')
+        self.ax.spines['left'].set_color('#333333')
+        self.ax.spines['top'].set_color('#1A1A1A')
+        self.ax.spines['right'].set_color('#1A1A1A')
+        
+    def plot_dados(self, df, ticker):
+        """ Desenha o gráfico de Fechamento e Médias Móveis. """
+        
+        self.ax.clear() # Limpa o gráfico anterior
+        
+        if df.empty or 'Close' not in df.columns:
+            self.ax.text(0.5, 0.5, "Dados não disponíveis para plotagem.", 
+                         color='red', fontsize=12, ha='center', transform=self.ax.transAxes)
+            self.canvas.draw()
+            return
+            
+        # 1. Plota o preço de fechamento
+        self.ax.plot(df.index, df['Close'], label='Fechamento', color='white', linewidth=1.5)
+        
+        # 2. Plota as Médias Móveis
+        if 'SMA_20' in df.columns:
+            self.ax.plot(df.index, df['SMA_20'], label='Média Móvel 20', color='yellow', linestyle='--')
+        if 'SMA_50' in df.columns:
+            self.ax.plot(df.index, df['SMA_50'], label='Média Móvel 50', color='cyan')
+            
+        # 3. Formatação Final
+        self.ax.set_title(f"Preço de Fechamento e Médias Móveis de {ticker}", color='white')
+        
+        # CORREÇÃO AQUI (AXIS LABELS)
+        self.ax.set_xlabel("Data") # Usar self.ax
+        self.ax.set_ylabel("Preço") # Usar self.ax
+
+        self.ax.legend(loc='upper left', frameon=False, fontsize=8)
+        self.ax.grid(True, linestyle=':', alpha=0.5, color='#333333')
+        
+        # Formatação do eixo X (Datas)
+        self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        self.fig.autofmt_xdate(rotation=45)
+        
+        # Garante que as cores personalizadas do Matplotlib sejam aplicadas
+        self.ax.tick_params(axis='x', colors='white')
+        self.ax.tick_params(axis='y', colors='white')
+        
+        # Desenha o novo gráfico
+        self.canvas.draw()
+
 
 class GlobalTickerTape(QWidget):
     """ Widget que simula um carrossel de notícias da bolsa (Ticker Tape). """
@@ -486,53 +557,6 @@ class KPIMetric(QFrame):
         self.delta_label.setStyleSheet(f"color: {cor}; font-weight: bold;")
 
 
-class PlotlyWebView(QWebEngineView):
-    """ Widget que hospeda um gráfico interativo do Plotly usando o QtWebEngine. """
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setStyleSheet("border-radius: 6px; overflow: hidden; border: none;")
-        self.default_html_content = "<html><body style='background-color:#000000; color:white; text-align:center; padding-top: 100px;'>Carregando Gráfico...</body></html>"
-        self.setHtml(self.default_html_content)
-        
-        # CORREÇÃO CRÍTICA: Forçar a ativação de JS
-        settings = self.settings()
-        if settings:
-            settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
-            # REMOVEMOS: settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
-            
-class PlotlyWebView(QWebEngineView):
-    # ... (código __init__ permanece o mesmo) ...
-
-    def plot_dados(self, df, ticker):
-        """ Cria e exibe o gráfico Plotly interativo usando HTML (FORÇADO OFFLINE). """
-        
-        if df.empty:
-            self.setHtml(f"<html><body style='background-color:#000000; color:red; text-align:center; padding-top: 100px;'>Dados não disponíveis para {ticker}</body></html>")
-            return
-
-        fig = go.Figure()
-        
-        fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Fechamento', line=dict(color='white'), hovertemplate='Fechamento: %{y:,.2f}<extra></extra>'))
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_20'], name='Média Móvel 20', line=dict(color='yellow', dash='dot'), hovertemplate='Média Móvel 20: %{y:,.2f}<extra></extra>'))
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], name='Média Móvel 50', line=dict(color='cyan'), hovertemplate='Média Móvel 50: %{y:,.2f}<extra></extra>'))
-
-        fig.update_layout(
-            title=f"Preço de Fechamento e Médias Móveis de {ticker}",
-            xaxis_title="Data",
-            yaxis_title="Preço",
-            hovermode="x unified",
-            template="plotly_dark", 
-            margin=dict(l=20, r=20, t=50, b=20),
-            showlegend=False
-        )
-
-        # MODO OFFLINE DEFINITIVO: 
-        # include_plotlyjs=True força a inclusão do JS dentro do HTML.
-        # full_html=True é necessário para garantir que todos os elementos HTML/JS sejam gerados.
-        html = fig.to_html(include_plotlyjs=True, full_html=True)
-        self.setHtml(html)
-
-        
 class NewsPanel(QWidget):
     """ Painel que exibe manchetes de notícias com links. """
     def __init__(self, titulo="Manchetes de Mercado"):
@@ -782,7 +806,8 @@ class AnalysisTabContent(QWidget):
         
         layout = QVBoxLayout(self)
         
-        self.index_graph = PlotlyWebView()
+        # ATENÇÃO: Substituído PlotlyWebView por MatplotlibWidget
+        self.index_graph = MatplotlibWidget() 
         self.performance_table = PerformanceTable(titulo=f"Performance dos Ativos")
         
         graph_container = QWidget()
@@ -918,7 +943,8 @@ class PortfolioAnalysisTab(QWidget):
         self.result_layout = QVBoxLayout(self.result_container)
         
         self.result_layout.addWidget(QLabel("Gráfico de Performance da Carteira vs. CDI"))
-        self.graph_view = PlotlyWebView()
+        # ATENÇÃO: Substituído PlotlyWebView por MatplotlibWidget
+        self.graph_view = MatplotlibWidget() 
         self.result_layout.addWidget(self.graph_view, 1)
         
         self.btn_run = QPushButton("Atualizar gráfico")
@@ -936,10 +962,15 @@ class PortfolioAnalysisTab(QWidget):
         portfolio_weights = self.input_widget.get_portfolio() 
         
         if not portfolio_weights:
-            self.graph_view.setHtml(f"<html><body style='background-color:#000000; color:red; text-align:center; padding-top: 100px;'>ERRO: Por favor, insira pelo menos um ativo válido.</body></html>")
+            # Mantemos o Matplotlib limpo em caso de erro
+            self.graph_view.ax.clear()
+            self.graph_view.ax.text(0.5, 0.5, "ERRO: Insira ativos válidos.", 
+                                    color='red', fontsize=12, ha='center', transform=self.graph_view.ax.transAxes)
+            self.graph_view.canvas.draw()
             return
         
-        self.graph_view.setHtml(f"<html><body style='background-color:#000000; color:#FFA500; text-align:center; padding-top: 100px;'>Calculando portfólio... Não congele! :)</body></html>")
+        # Mensagem de carregamento (Matplotlib não permite HTML, usamos o console)
+        print("Calculando portfólio... Aguarde.")
 
         app = QApplication.instance()
         if hasattr(app, 'threadpool'):
@@ -952,28 +983,40 @@ class PortfolioAnalysisTab(QWidget):
         self.plot_comparison(df_comparison)
         
     def plot_comparison(self, df_comparison):
-        """ Plota o gráfico de comparação de performance. """
+        """ Plota o gráfico de comparação de performance usando Matplotlib. """
+        
+        self.graph_view.ax.clear()
         
         if df_comparison.empty:
-            self.graph_view.setHtml(f"<html><body style='background-color:#000000; color:red; text-align:center; padding-top: 100px;'>ERRO: Dados insuficientes para plotar o gráfico. Verifique Tickers e a Data de Início.</body></html>")
+            self.graph_view.ax.text(0.5, 0.5, "Dados insuficientes para plotagem.", 
+                                    color='red', fontsize=12, ha='center', transform=self.graph_view.ax.transAxes)
+            self.graph_view.canvas.draw()
             return
 
-        fig = go.Figure()
+        # Plota Carteira
+        self.graph_view.ax.plot(df_comparison.index, df_comparison['Carteira'], 
+                                label='Minha Carteira', color='#FFA500', linewidth=2)
 
-        fig.add_trace(go.Scatter(x=df_comparison.index, y=df_comparison['Carteira'], name='Minha Carteira', line=dict(color='#FFA500'), hovertemplate='Retorno: %{y:.2f}%'))
-
+        # Plota CDI
         if 'CDI' in df_comparison.columns:
-            fig.add_trace(go.Scatter(x=df_comparison.index, y=df_comparison['CDI'], name='CDI', line=dict(color='#FFFFFF', dash='dash'), hovertemplate='Retorno: %{y:.2f}%'))
+            self.graph_view.ax.plot(df_comparison.index, df_comparison['CDI'], 
+                                    label='CDI', color='white', linestyle='--', linewidth=1)
             
-        fig.update_layout(
-            title="Retorno Acumulado: Carteira vs. CDI (%)",
-            yaxis_title="Retorno Acumulado (%)",
-            hovermode="x unified",
-            template="plotly_dark", 
-            showlegend=True
-        )
+        # Formatação
+        self.graph_view.ax.set_title("Retorno Acumulado: Carteira vs. CDI (%)", color='white') # Já está certo (usando .ax.set_title)
         
-        self.graph_view.setHtml(fig.to_html(include_plotlyjs='cdn', full_html=True))
+        # CORREÇÃO AQUI (AXIS LABELS)
+        self.graph_view.ax.set_xlabel("Data") # Usar .ax.set_xlabel
+        self.graph_view.ax.set_ylabel("Retorno Acumulado (%)") # Usar .ax.set_ylabel
+
+        self.graph_view.ax.legend(loc='upper left', frameon=False, fontsize=8, labelcolor='white')
+        self.graph_view.ax.grid(True, linestyle=':', alpha=0.3, color='#333333')
+        
+        # Formatação do eixo X (Datas)
+        self.graph_view.ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        self.graph_view.fig.autofmt_xdate(rotation=45)
+        
+        self.graph_view.canvas.draw()
 
 
 # ==========================================================
@@ -1125,7 +1168,8 @@ class TerminalFinanceiroApp(QMainWindow):
         ibovespa_container.layout().setContentsMargins(0, 0, 0, 0)
         ibovespa_container.setStyleSheet("border: 1px solid #333333; border-radius: 6px;")
         
-        self.grafico_ibov_canvas = PlotlyWebView()
+        # ATENÇÃO: SUBSTITUIÇÃO AQUI
+        self.grafico_ibov_canvas = MatplotlibWidget() 
         ibovespa_container.layout().addWidget(self.grafico_ibov_canvas)
 
 
@@ -1154,7 +1198,9 @@ class TerminalFinanceiroApp(QMainWindow):
         ativo_graph_container.setLayout(QVBoxLayout())
         ativo_graph_container.layout().setContentsMargins(0, 0, 0, 0)
         ativo_graph_container.setStyleSheet("border: 1px solid #333333; border-radius: 6px;")
-        self.grafico_ativo_canvas = PlotlyWebView()
+        
+        # ATENÇÃO: SUBSTITUIÇÃO AQUI
+        self.grafico_ativo_canvas = MatplotlibWidget() 
         ativo_graph_container.layout().addWidget(self.grafico_ativo_canvas)
 
         layout_detalhes.addWidget(QLabel("Gráfico Histórico do Ativo Selecionado"))
@@ -1276,7 +1322,8 @@ class TerminalFinanceiroApp(QMainWindow):
         """ Função principal para buscar, calcular e plotar o Ticker selecionado assíncronamente. """
         ticker = self.input_ticker.text().upper()
         
-        self.grafico_ativo_canvas.setHtml(f"<html><body style='background-color:#000000; color:#FFA500; text-align:center; padding-top: 100px;'>Carregando dados para {ticker}...</body></html>")
+        # Não precisa mais de HTML de carregamento no Matplotlib, apenas do console.
+        print(f"Buscando dados para o ativo {ticker}...")
 
         self.execute_async_task(
             fn=_buscar_e_combinar_dados_ativo,

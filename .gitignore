@@ -13,3 +13,12 @@ dist/
 
 # IDE/VS Code
 .vscode/
+venv/Lib/site-packages/__pycache__/peewee.cpython-312.pyc
+/venv
+/venv
+/venv/Lib
+/venv
+/venv/Lib/site-packages/__pycache__
+/venv
+/venv
+/venv
