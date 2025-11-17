@@ -7,6 +7,9 @@ import yfinance as yf
 import requests
 from datetime import date
 import time
+from datetime import datetime, timedelta
+from matplotlib.figure import Figure
+
 # Imports Matplotlib NATIVOS
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -79,7 +82,7 @@ class Worker(QRunnable):
             exctype, value = sys.exc_info()[:2]
             self.signals.error.emit((exctype, value, traceback.format_exc()))
         else:
-             self.signals.result.emit(result)
+            self.signals.result.emit(result)
         finally:
             self.signals.finished.emit()
 
@@ -94,7 +97,7 @@ def _fetch_yfinance_with_retry(fetch_fn, retries=3, delay=1, *args, **kwargs):
         try:
             result = fetch_fn(*args, **kwargs)
             if not isinstance(result, pd.DataFrame) or not result.empty:
-                 return result
+                return result
         except Exception as e:
             if i < retries - 1:
                 print(f"Erro de yfinance (Tentativa {i+1}/{retries}): {e}. Tentando novamente em {delay}s...")
@@ -185,7 +188,7 @@ def buscar_noticias_av(ticker, limite=3):
         return []
     ticker_av = ticker.replace(".SA", "")
     url = (f"https://www.alphavantage.co/query?function=NEWS_SENTIMENT&"
-           f"tickers={ticker_av}&limit={limite}&apikey={ALPHA_VANTAGE_KEY}")
+            f"tickers={ticker_av}&limit={limite}&apikey={ALPHA_VANTAGE_KEY}")
     try:
         response = requests.get(url, timeout=5)
         response.raise_for_status() 
@@ -308,7 +311,9 @@ class MatplotlibWidget(QWidget):
         
         # 1. Configura a figura (área de desenho)
         plt.style.use('dark_background')
-        self.fig, self.ax = plt.subplots(facecolor='#1A1A1A') # Cor de fundo da figura
+        # self.fig, self.ax = plt.subplots(facecolor='#1A1A1A') # ORIGINAL
+        self.fig = Figure(facecolor='#1A1A1A')
+        self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvas(self.fig)
         
         # 2. Configura o layout
@@ -334,7 +339,7 @@ class MatplotlibWidget(QWidget):
         
         if df.empty or 'Close' not in df.columns:
             self.ax.text(0.5, 0.5, "Dados não disponíveis para plotagem.", 
-                         color='red', fontsize=12, ha='center', transform=self.ax.transAxes)
+                          color='red', fontsize=12, ha='center', transform=self.ax.transAxes)
             self.canvas.draw()
             return
             
@@ -965,7 +970,7 @@ class PortfolioAnalysisTab(QWidget):
             # Mantemos o Matplotlib limpo em caso de erro
             self.graph_view.ax.clear()
             self.graph_view.ax.text(0.5, 0.5, "ERRO: Insira ativos válidos.", 
-                                    color='red', fontsize=12, ha='center', transform=self.graph_view.ax.transAxes)
+                                     color='red', fontsize=12, ha='center', transform=self.graph_view.ax.transAxes)
             self.graph_view.canvas.draw()
             return
         
@@ -989,18 +994,18 @@ class PortfolioAnalysisTab(QWidget):
         
         if df_comparison.empty:
             self.graph_view.ax.text(0.5, 0.5, "Dados insuficientes para plotagem.", 
-                                    color='red', fontsize=12, ha='center', transform=self.graph_view.ax.transAxes)
+                                     color='red', fontsize=12, ha='center', transform=self.graph_view.ax.transAxes)
             self.graph_view.canvas.draw()
             return
 
         # Plota Carteira
         self.graph_view.ax.plot(df_comparison.index, df_comparison['Carteira'], 
-                                label='Minha Carteira', color='#FFA500', linewidth=2)
+                                 label='Minha Carteira', color='#FFA500', linewidth=2)
 
         # Plota CDI
         if 'CDI' in df_comparison.columns:
             self.graph_view.ax.plot(df_comparison.index, df_comparison['CDI'], 
-                                    label='CDI', color='white', linestyle='--', linewidth=1)
+                                     label='CDI', color='white', linestyle='--', linewidth=1)
             
         # Formatação
         self.graph_view.ax.set_title("Retorno Acumulado: Carteira vs. CDI (%)", color='white') # Já está certo (usando .ax.set_title)
@@ -1056,10 +1061,15 @@ class TerminalFinanceiroApp(QMainWindow):
         # 4. Chamadas iniciais (Assíncronas)
         self.atualizar_dados_kpis()
         self.atualizar_dados_top_movers_dashboard()
-        self.plotar_grafico_b3()
+        # self.plotar_grafico_b3() # Removida a chamada antiga
+        self.plotar_grafico_ibovespa() # Nova chamada para o gráfico interativo
         self.atualizar_dados_ativo() 
         self.atualizar_dados_performance_completa()
-
+        
+        # NOVO TIMER: Atualiza o gráfico do Ibovespa a cada 5 minutos (300000 ms)
+        self.timer_ibovespa = QTimer(self)
+        self.timer_ibovespa.timeout.connect(self.plotar_grafico_ibovespa)
+        self.timer_ibovespa.start(300000) # 5 minutos
 
     def configurar_tema_escuro(self):
         """ Aplica um tema escuro consistente e define fontes. """
@@ -1163,20 +1173,22 @@ class TerminalFinanceiroApp(QMainWindow):
         
         self.table_top_movers_dashboard = PerformanceTable(titulo="Performance do Dia")
 
-        #ibovespa_container = QWidget()
-        #ibovespa_container.setLayout(QVBoxLayout())
-        #ibovespa_container.layout().setContentsMargins(0, 0, 0, 0)
-        #ibovespa_container.setStyleSheet("border: 1px solid #333333; border-radius: 6px;")
+        # INÍCIO - REATIVAÇÃO DO GRÁFICO IBOVESPA NA POSIÇÃO INFERIOR DIREITA
+        ibovespa_container = QWidget()
+        ibovespa_container.setLayout(QVBoxLayout())
+        ibovespa_container.layout().setContentsMargins(0, 0, 0, 0)
+        ibovespa_container.setStyleSheet("border: 1px solid #333333; border-radius: 6px; background-color: #1A1A1A;")
         
         # ATENÇÃO: SUBSTITUIÇÃO AQUI
-        #self.grafico_ibov_canvas = MatplotlibWidget() 
-        #ibovespa_container.layout().addWidget(self.grafico_ibov_canvas)
-
-
-        self.grid_layout.addWidget(q1_widget, 0, 0, 1, 1) 
-        self.grid_layout.addWidget(self.news_panel, 0, 1, 1, 1) 
-        self.grid_layout.addWidget(self.table_top_movers_dashboard, 1, 0, 1, 1) 
-        #self.grid_layout.addWidget(ibovespa_container, 1, 1, 1, 1) 
+        self.grafico_ibov_canvas = MatplotlibWidget() 
+        ibovespa_container.layout().addWidget(self.grafico_ibov_canvas)
+        # FIM - REATIVAÇÃO DO GRÁFICO IBOVESPA
+        
+        # AJUSTE DO GRID LAYOUT PARA 2x2:
+        self.grid_layout.addWidget(q1_widget, 0, 0, 1, 1) # Canto Superior Esquerdo
+        self.grid_layout.addWidget(self.news_panel, 0, 1, 1, 1) # Canto Superior Direito
+        self.grid_layout.addWidget(self.table_top_movers_dashboard, 1, 0, 1, 1) # Canto Inferior Esquerdo
+        self.grid_layout.addWidget(ibovespa_container, 1, 1, 1, 1) # Canto Inferior Direito (Gráfico)
         
         layout_dashboard_principal.addWidget(grid_container, 1)
 
@@ -1248,20 +1260,21 @@ class TerminalFinanceiroApp(QMainWindow):
         self.atualizar_dados_top_movers_dashboard()
         self.ticker_tape.update_data() 
         self.commodity_tape.update_data()
+        self.plotar_grafico_ibovespa() # Chama a atualização do gráfico a cada 60s (timer_kpis)
         print("Atualização periódica dos KPIs e Carrossel concluída.")
         
-    def plotar_grafico_b3(self):
-        """ Inicia a busca do gráfico do Ibovespa em uma thread. """
-        self.execute_async_task(
-            fn=buscar_dados_historicos, 
-            callback_result=self.processar_grafico_b3, 
-            ticker=TICKER_IBOVESPA,
-            data_inicio=self.data_inicio
-        )
+    # def plotar_grafico_b3(self): # REMOVIDA A FUNÇÃO ANTIGA
+    #     """ Inicia a busca do gráfico do Ibovespa em uma thread. """
+    #     self.execute_async_task(
+    #         fn=buscar_dados_historicos, 
+    #         callback_result=self.processar_grafico_b3, 
+    #         ticker=TICKER_IBOVESPA,
+    #         data_inicio=self.data_inicio
+    #     )
     
-    def processar_grafico_b3(self, dados_ibov):
-        """ Callback para o Worker: Plota o gráfico do Ibovespa. """
-        self.grafico_ibov_canvas.plot_dados(dados_ibov, "IBOVESPA")
+    # def processar_grafico_b3(self, dados_ibov): # REMOVIDA A FUNÇÃO ANTIGA
+    #     """ Callback para o Worker: Plota o gráfico do Ibovespa. """
+    #     self.grafico_ibov_canvas.plot_dados(dados_ibov, "IBOVESPA")
 
     def atualizar_dados_kpis(self):
         """ Inicia a busca de KPIs em uma thread. """
@@ -1344,6 +1357,40 @@ class TerminalFinanceiroApp(QMainWindow):
         self.news_panel.update_news(noticias_combinadas)
         
         print(f"Dados, Gráfico e Notícias de {ticker} atualizados na UI com sucesso.")
+        
+    def plotar_grafico_ibovespa(self):
+        """ Busca e plota os dados do Ibovespa para um gráfico de linhas interativo. """
+        try:
+            # Símbolo do Ibovespa no Yahoo Finance é "^BVSP"
+            ticker_yf = yf.Ticker("^BVSP")
+            
+            # Pega dados dos últimos 7 dias com intervalo de 60 minutos
+            dados = ticker_yf.history(period="7d", interval="60m") 
+            
+            if dados.empty:
+                print("Não foi possível carregar dados do Ibovespa.")
+                return
+
+            self.grafico_ibov_canvas.ax.clear()
+            
+            # Estilizar o gráfico (Lilás com área preenchida, como sugerido)
+            self.grafico_ibov_canvas.ax.plot(dados.index, dados['Close'], color='#6A5ACD', linewidth=1.5)
+            self.grafico_ibov_canvas.ax.fill_between(dados.index, dados['Close'], color='#6A5ACD', alpha=0.3) 
+
+            # Formatação
+            self.grafico_ibov_canvas.ax.set_title('Índice Bovespa', color='white', fontsize=12)
+            self.grafico_ibov_canvas.ax.set_ylabel('Pontos', color='white', fontsize=10)
+            self.grafico_ibov_canvas.ax.tick_params(axis='x', colors='white', labelsize=8)
+            self.grafico_ibov_canvas.ax.tick_params(axis='y', colors='white', labelsize=8)
+            self0.grafico_ibov_canvas.ax.grid(True, linestyle=':', alpha=0.3, color='#333333')
+            
+            # Formatar os ticks do eixo X
+            self.grafico_ibov_canvas.figure.autofmt_xdate(rotation=45) 
+            
+            self.grafico_ibov_canvas.canvas.draw()
+            
+        except Exception as e:
+            print(f"Erro ao plotar gráfico do Ibovespa: {e}")
 
 
 # ==========================================================
