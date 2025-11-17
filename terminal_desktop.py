@@ -305,13 +305,13 @@ def _buscar_e_combinar_dados_ativo(ticker, data_inicio):
 class MatplotlibWidget(QWidget):
     """
     Widget nativo para renderização de gráficos Matplotlib dentro do PyQt.
+    Adiciona lógica para interatividade (hover).
     """
     def __init__(self, parent=None):
         super().__init__(parent)
         
         # 1. Configura a figura (área de desenho)
         plt.style.use('dark_background')
-        # self.fig, self.ax = plt.subplots(facecolor='#1A1A1A') # ORIGINAL
         self.fig = Figure(facecolor='#1A1A1A')
         self.ax = self.fig.add_subplot(111)
         self.canvas = FigureCanvas(self.fig)
@@ -321,7 +321,7 @@ class MatplotlibWidget(QWidget):
         layout.setContentsMargins(5, 5, 5, 5)
         layout.addWidget(self.canvas)
         
-        # Configurações iniciais do eixo (para ter certeza que o tema escuro se aplica)
+        # Configurações iniciais do eixo
         self.ax.tick_params(colors='white')
         self.ax.xaxis.label.set_color('white')
         self.ax.yaxis.label.set_color('white')
@@ -331,35 +331,67 @@ class MatplotlibWidget(QWidget):
         self.ax.spines['left'].set_color('#333333')
         self.ax.spines['top'].set_color('#1A1A1A')
         self.ax.spines['right'].set_color('#1A1A1A')
+
+        # Inicializa variáveis para o hover
+        self.df_dados = pd.DataFrame()
+        self.ticker_name = ""
+        self.annotation = None
+        self.vert_line = None
+        self._cid = None # Para armazenar a conexão do evento
         
     def plot_dados(self, df, ticker):
-        """ Desenha o gráfico de Fechamento e Médias Móveis. """
+        """ Desenha o gráfico de Fechamento e Médias Móveis, e configura o hover. """
         
         self.ax.clear() # Limpa o gráfico anterior
+        self.df_dados = df # <<-- ARMAZENA O DATAFRAME para a função on_hover
+        self.ticker_name = ticker
+
+        # Desconecta o evento antigo se existir
+        if self._cid:
+            self.canvas.mpl_disconnect(self._cid)
+            self._cid = None
         
+        # Oculta anotações antigas (se existirem)
+        if self.annotation:
+            self.annotation.set_visible(False)
+        if self.vert_line:
+            self.vert_line.set_visible(False)
+
+
         if df.empty or 'Close' not in df.columns:
             self.ax.text(0.5, 0.5, "Dados não disponíveis para plotagem.", 
                           color='red', fontsize=12, ha='center', transform=self.ax.transAxes)
             self.canvas.draw()
             return
             
-        # 1. Plota o preço de fechamento
-        self.ax.plot(df.index, df['Close'], label='Fechamento', color='white', linewidth=1.5)
-        
-        # 2. Plota as Médias Móveis
-        if 'SMA_20' in df.columns:
-            self.ax.plot(df.index, df['SMA_20'], label='Média Móvel 20', color='yellow', linestyle='--')
-        if 'SMA_50' in df.columns:
-            self.ax.plot(df.index, df['SMA_50'], label='Média Móvel 50', color='cyan')
+        # 1. LÓGICA DE PLOTAGEM
+        if ticker == "IBOVESPA":
+            # Estilo do Ibovespa (para o gráfico principal na dashboard)
+            self.ax.plot(df.index, df['Close'], color='#6A5ACD', linewidth=1.5)
+            self.ax.fill_between(df.index, df['Close'], color='#6A5ACD', alpha=0.3) 
+            self.ax.set_title(f"Índice Bovespa", color='white', fontsize=12)
+            self.ax.set_ylabel('Pontos', color='white', fontsize=10)
+            if self.ax.legend():
+                self.ax.legend().set_visible(False) # Esconde legendas se for Ibovespa
+        else:
+            # Estilo padrão para outros ativos/abas
+            self.ax.plot(df.index, df['Close'], label='Fechamento', color='white', linewidth=1.5)
             
-        # 3. Formatação Final
-        self.ax.set_title(f"Preço de Fechamento e Médias Móveis de {ticker}", color='white')
-        
-        # CORREÇÃO AQUI (AXIS LABELS)
-        self.ax.set_xlabel("Data") # Usar self.ax
-        self.ax.set_ylabel("Preço") # Usar self.ax
+            # 2. Plota as Médias Móveis
+            if 'SMA_20' in df.columns:
+                self.ax.plot(df.index, df['SMA_20'], label='Média Móvel 20', color='yellow', linestyle='--')
+            if 'SMA_50' in df.columns:
+                self.ax.plot(df.index, df['SMA_50'], label='Média Móvel 50', color='cyan')
+                
+            # 3. Formatação Final
+            self.ax.set_title(f"Preço de Fechamento e Médias Móveis de {ticker}", color='white')
+            self.ax.legend(loc='upper left', frameon=False, fontsize=8)
 
-        self.ax.legend(loc='upper left', frameon=False, fontsize=8)
+        
+        # Formatação Comum
+        self.ax.set_xlabel("Data") 
+        self.ax.set_ylabel("Preço")
+
         self.ax.grid(True, linestyle=':', alpha=0.5, color='#333333')
         
         # Formatação do eixo X (Datas)
@@ -370,8 +402,80 @@ class MatplotlibWidget(QWidget):
         self.ax.tick_params(axis='x', colors='white')
         self.ax.tick_params(axis='y', colors='white')
         
+        # 4. CONFIGURAÇÃO DA ANOTAÇÃO INTERATIVA (HOVER)
+        
+        # Cria a anotação e a linha vertical (se ainda não existirem)
+        if not self.annotation:
+            self.annotation = self.ax.annotate(
+                '', xy=(0, 0), xytext=(20, 20), textcoords='offset points',
+                bbox=dict(boxstyle="round,pad=0.5", fc="black", alpha=0.8, ec="#6A5ACD"), 
+                arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=0", color="#6A5ACD"),
+                color='white', fontsize=9
+            )
+            # Inicializa a linha vertical
+            self.vert_line = self.ax.axvline(x=df.index[0], color='white', linestyle='--', linewidth=1, alpha=0.7)
+            
+        self.annotation.set_visible(False)
+        self.vert_line.set_visible(False)
+
+        # Conecta o evento de movimento do mouse (A CHAVE PARA A INTERATIVIDADE)
+        self._cid = self.canvas.mpl_connect('motion_notify_event', self.on_hover)
+
         # Desenha o novo gráfico
         self.canvas.draw()
+        
+    def on_hover(self, event):
+        """ Lida com o movimento do mouse para exibir a anotação. """
+        if event.inaxes != self.ax or self.df_dados.empty:
+            if self.annotation and self.vert_line:
+                self.annotation.set_visible(False)
+                self.vert_line.set_visible(False)
+                self.canvas.draw_idle()
+            return
+
+        # 1. Encontra o índice do dado mais próximo
+        xdata_raw = self.df_dados.index
+        
+        # Verifica se o evento tem dados X válidos
+        if event.xdata is None:
+            self.annotation.set_visible(False)
+            self.vert_line.set_visible(False)
+            self.canvas.draw_idle()
+            return
+
+        # Converte a data do índice para o formato numérico do Matplotlib
+        xdata_num = mdates.date2num(xdata_raw)
+        
+        # Encontra o índice da data mais próxima
+        idx = (abs(xdata_num - event.xdata)).argmin()
+
+        # 2. Obtém os valores daquele ponto
+        date_at_idx = xdata_raw[idx]
+        close_price = self.df_dados['Close'].iloc[idx]
+        
+        # 3. Formata o texto da anotação
+        date_str = date_at_idx.strftime('%d/%m %H:%M')
+        # Formata o preço com separador de milhar (como no restante do código)
+        price_str = f"{close_price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        
+        text = f"Data: {date_str}\n{self.ticker_name}: {price_str}"
+
+        # 4. Atualiza a posição e o conteúdo da anotação
+        
+        # Ponto de dado real (para a flecha)
+        xy_point = (date_at_idx, close_price)
+        
+        # Atualiza a linha vertical
+        self.vert_line.set_xdata(date_at_idx)
+        self.vert_line.set_visible(True)
+
+        # Atualiza o texto e a posição
+        self.annotation.xy = xy_point
+        self.annotation.set_text(text)
+        self.annotation.set_visible(True)
+        
+        # 5. Redesenha o canvas para mostrar as mudanças
+        self.canvas.draw_idle()
 
 
 class GlobalTickerTape(QWidget):
@@ -438,6 +542,7 @@ class GlobalTickerTape(QWidget):
                 continue
 
             variacao = data['Variacao']
+            preco_atual = data['Preco'] # <<-- Pegando o preço
             
             if variacao > 0.05:
                 cor = "#76DD76"
@@ -472,7 +577,14 @@ class GlobalTickerTape(QWidget):
             else:
                 nome_display = data['Nome'].upper()
                 
-            frase = f"{nome_display} ({variacao:+.2f}%) {seta}"
+            if preco_atual > 1000:
+                preco_formatado = f"{preco_atual:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            else:
+                preco_formatado = f"{preco_atual:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                
+            variacao_formatada = f"{variacao:+.2f}%"
+                
+            frase = f"{nome_display} {preco_formatado} ({variacao_formatada}) {seta}"
             
             label = QLabel(frase)
             label.setStyleSheet(f"color: {cor}; font-weight: bold; font-size: 12px;")
@@ -1263,19 +1375,6 @@ class TerminalFinanceiroApp(QMainWindow):
         self.plotar_grafico_ibovespa() # Chama a atualização do gráfico a cada 60s (timer_kpis)
         print("Atualização periódica dos KPIs e Carrossel concluída.")
         
-    # def plotar_grafico_b3(self): # REMOVIDA A FUNÇÃO ANTIGA
-    #     """ Inicia a busca do gráfico do Ibovespa em uma thread. """
-    #     self.execute_async_task(
-    #         fn=buscar_dados_historicos, 
-    #         callback_result=self.processar_grafico_b3, 
-    #         ticker=TICKER_IBOVESPA,
-    #         data_inicio=self.data_inicio
-    #     )
-    
-    # def processar_grafico_b3(self, dados_ibov): # REMOVIDA A FUNÇÃO ANTIGA
-    #     """ Callback para o Worker: Plota o gráfico do Ibovespa. """
-    #     self.grafico_ibov_canvas.plot_dados(dados_ibov, "IBOVESPA")
-
     def atualizar_dados_kpis(self):
         """ Inicia a busca de KPIs em uma thread. """
         self.execute_async_task(
@@ -1371,23 +1470,8 @@ class TerminalFinanceiroApp(QMainWindow):
                 print("Não foi possível carregar dados do Ibovespa.")
                 return
 
-            self.grafico_ibov_canvas.ax.clear()
-            
-            # Estilizar o gráfico (Lilás com área preenchida, como sugerido)
-            self.grafico_ibov_canvas.ax.plot(dados.index, dados['Close'], color='#6A5ACD', linewidth=1.5)
-            self.grafico_ibov_canvas.ax.fill_between(dados.index, dados['Close'], color='#6A5ACD', alpha=0.3) 
-
-            # Formatação
-            self.grafico_ibov_canvas.ax.set_title('Índice Bovespa', color='white', fontsize=12)
-            self.grafico_ibov_canvas.ax.set_ylabel('Pontos', color='white', fontsize=10)
-            self.grafico_ibov_canvas.ax.tick_params(axis='x', colors='white', labelsize=8)
-            self.grafico_ibov_canvas.ax.tick_params(axis='y', colors='white', labelsize=8)
-            self0.grafico_ibov_canvas.ax.grid(True, linestyle=':', alpha=0.3, color='#333333')
-            
-            # Formatar os ticks do eixo X
-            self.grafico_ibov_canvas.figure.autofmt_xdate(rotation=45) 
-            
-            self.grafico_ibov_canvas.canvas.draw()
+            # Apenas chama plot_dados, que agora contém toda a lógica de estilização e hover
+            self.grafico_ibov_canvas.plot_dados(dados, "IBOVESPA")
             
         except Exception as e:
             print(f"Erro ao plotar gráfico do Ibovespa: {e}")
