@@ -1163,20 +1163,20 @@ class TerminalFinanceiroApp(QMainWindow):
         
         self.table_top_movers_dashboard = PerformanceTable(titulo="Performance do Dia")
 
-        ibovespa_container = QWidget()
-        ibovespa_container.setLayout(QVBoxLayout())
-        ibovespa_container.layout().setContentsMargins(0, 0, 0, 0)
-        ibovespa_container.setStyleSheet("border: 1px solid #333333; border-radius: 6px;")
+        #ibovespa_container = QWidget()
+        #ibovespa_container.setLayout(QVBoxLayout())
+        #ibovespa_container.layout().setContentsMargins(0, 0, 0, 0)
+        #ibovespa_container.setStyleSheet("border: 1px solid #333333; border-radius: 6px;")
         
         # ATENÇÃO: SUBSTITUIÇÃO AQUI
-        self.grafico_ibov_canvas = MatplotlibWidget() 
-        ibovespa_container.layout().addWidget(self.grafico_ibov_canvas)
+        #self.grafico_ibov_canvas = MatplotlibWidget() 
+        #ibovespa_container.layout().addWidget(self.grafico_ibov_canvas)
 
 
         self.grid_layout.addWidget(q1_widget, 0, 0, 1, 1) 
         self.grid_layout.addWidget(self.news_panel, 0, 1, 1, 1) 
         self.grid_layout.addWidget(self.table_top_movers_dashboard, 1, 0, 1, 1) 
-        self.grid_layout.addWidget(ibovespa_container, 1, 1, 1, 1) 
+        #self.grid_layout.addWidget(ibovespa_container, 1, 1, 1, 1) 
         
         layout_dashboard_principal.addWidget(grid_container, 1)
 
@@ -1283,7 +1283,7 @@ class TerminalFinanceiroApp(QMainWindow):
         self.execute_async_task(
             fn=buscar_top_performances, 
             callback_result=self.processar_top_movers, 
-            tickers_list=["PETR4.SA", "VALE3.SA", "ITUB4.SA", "BBDC4.SA", "MGLU3.SA"]
+            tickers_list=["PETR4.SA", "VALE3.SA", "ITUB4.SA", "BBDC4.SA", "MGLU3.SA", "BBAS3.SA", "AXIA3.SA","B3SA3.SA","SUZB3.SA"]
         )
 
     def processar_top_movers(self, df_performance):

@@ -1,5 +1,6 @@
-Entre na pasta do projeto:
+Entre na pasta do projeto pwr shell:
         cd C:\Users\Marcus\Documents\GitHub\Terminal-Financeiro
+        cd C:\Users\Marcus\Documents\Projetos\terminal_financeiro
 
 Verifique e Puxe as Últimas Alterações: (Isto garante que a versão local é a mesma que você acabou de subir para o GitHub)
         git pull origin master
