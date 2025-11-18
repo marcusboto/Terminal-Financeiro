@@ -15,6 +15,9 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.dates as mdates
 
+# IMPORTS PARA TREEMAP (NECESSITA: pip install squarify)
+import squarify
+
 # 💡 MÓDULOS PyQt5 (INTERFACE GRÁFICA)
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
@@ -43,8 +46,8 @@ TICKER_IBOVESPA = "^BVSP"
 
 TICKERS_TAPE = ["USDBRL=X", "^BVSP", "^N225", "000001.SS", "^MERV"]
 
-TICKERS_S_AND_P = ["^GSPC", "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "NFLX", "JPM"]
-TICKERS_CRYPTO = ["BTC-USD", "ETH-USD", "SOL-USD", "ADA-USD", "XRP-USD", "DOGE-USD", "DOT-USD"]
+TICKERS_S_AND_P = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "NFLX", "JPM", "META", "BRKB" ]
+TICKERS_CRYPTO = ["BTC-USD", "ETH-USD", "SOL-USD", "ADA-USD", "XRP-USD", "DOGE-USD", "DOT-USD", "BNB-USD", "BCH-USD"]
 
 TICKERS_COMMODITIES = ["CL=F", "GC=F", "SI=F", "KC=F", "NG=F"] 
 TICKER_CDI = "BNDX" 
@@ -96,7 +99,11 @@ def _fetch_yfinance_with_retry(fetch_fn, retries=3, delay=1, *args, **kwargs):
     for i in range(retries):
         try:
             result = fetch_fn(*args, **kwargs)
-            if not isinstance(result, pd.DataFrame) or not result.empty:
+            # Verifica se o resultado é um DataFrame e se não está vazio
+            if isinstance(result, pd.DataFrame) and not result.empty:
+                return result
+            # Se for outro tipo de dado e não for None, retorne.
+            if result is not None:
                 return result
         except Exception as e:
             if i < retries - 1:
@@ -104,7 +111,7 @@ def _fetch_yfinance_with_retry(fetch_fn, retries=3, delay=1, *args, **kwargs):
                 time.sleep(delay)
             else:
                 print(f"ERRO CRÍTICO yfinance: Falhou após {retries} tentativas. {e}")
-                return None
+                return None 
     return None
 
 def buscar_dados_historicos(ticker, data_inicio_str):
@@ -255,6 +262,7 @@ def buscar_top_performances(tickers_list=None):
 
 # Função Auxiliar para o Worker (Cálculo da Carteira)
 def _calcular_carteira_async(portfolio_weights, data_inicio):
+    """ Calcula o retorno acumulado da carteira vs. CDI. """
     tickers = list(portfolio_weights.keys())
     all_data = {t: buscar_dados_historicos(t, data_inicio) for t in tickers}
     df_cdi = buscar_dados_historicos(TICKER_CDI, data_inicio)
@@ -337,6 +345,7 @@ class MatplotlibWidget(QWidget):
         self.ticker_name = ""
         self.annotation = None
         self.vert_line = None
+        self.marker = None # O ponto/marcador que se move
         self._cid = None # Para armazenar a conexão do evento
         
     def plot_dados(self, df, ticker):
@@ -356,6 +365,8 @@ class MatplotlibWidget(QWidget):
             self.annotation.set_visible(False)
         if self.vert_line:
             self.vert_line.set_visible(False)
+        if self.marker: 
+            self.marker.set_visible(False) 
 
 
         if df.empty or 'Close' not in df.columns:
@@ -366,9 +377,10 @@ class MatplotlibWidget(QWidget):
             
         # 1. LÓGICA DE PLOTAGEM
         if ticker == "IBOVESPA":
-            # Estilo do Ibovespa (para o gráfico principal na dashboard)
+            # Estilo Ibovespa: AGORA APENAS LINHA
             self.ax.plot(df.index, df['Close'], color='#6A5ACD', linewidth=1.5)
-            self.ax.fill_between(df.index, df['Close'], color='#6A5ACD', alpha=0.3) 
+            # self.ax.fill_between(df.index, df['Close'], color='#6A5ACD', alpha=0.3) # <--- REMOVIDO
+            
             self.ax.set_title(f"Índice Bovespa", color='white', fontsize=12)
             self.ax.set_ylabel('Pontos', color='white', fontsize=10)
             if self.ax.legend():
@@ -404,6 +416,10 @@ class MatplotlibWidget(QWidget):
         
         # 4. CONFIGURAÇÃO DA ANOTAÇÃO INTERATIVA (HOVER)
         
+        # Cria ou reconfigura o marcador que se move
+        if not self.marker:
+             self.marker, = self.ax.plot([], [], marker='o', color='#6A5ACD', markersize=5, zorder=10)
+        
         # Cria a anotação e a linha vertical (se ainda não existirem)
         if not self.annotation:
             self.annotation = self.ax.annotate(
@@ -412,11 +428,11 @@ class MatplotlibWidget(QWidget):
                 arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=0", color="#6A5ACD"),
                 color='white', fontsize=9
             )
-            # Inicializa a linha vertical
             self.vert_line = self.ax.axvline(x=df.index[0], color='white', linestyle='--', linewidth=1, alpha=0.7)
             
         self.annotation.set_visible(False)
         self.vert_line.set_visible(False)
+        self.marker.set_visible(False) # Garante que o marcador comece invisível
 
         # Conecta o evento de movimento do mouse (A CHAVE PARA A INTERATIVIDADE)
         self._cid = self.canvas.mpl_connect('motion_notify_event', self.on_hover)
@@ -426,20 +442,22 @@ class MatplotlibWidget(QWidget):
         
     def on_hover(self, event):
         """ Lida com o movimento do mouse para exibir a anotação. """
+        # Verifica se o mouse está no eixo e se há dados
         if event.inaxes != self.ax or self.df_dados.empty:
-            if self.annotation and self.vert_line:
+            if self.annotation and self.vert_line and self.marker: 
                 self.annotation.set_visible(False)
                 self.vert_line.set_visible(False)
+                self.marker.set_visible(False) 
                 self.canvas.draw_idle()
             return
 
         # 1. Encontra o índice do dado mais próximo
         xdata_raw = self.df_dados.index
         
-        # Verifica se o evento tem dados X válidos
         if event.xdata is None:
             self.annotation.set_visible(False)
             self.vert_line.set_visible(False)
+            self.marker.set_visible(False)
             self.canvas.draw_idle()
             return
 
@@ -465,6 +483,10 @@ class MatplotlibWidget(QWidget):
         # Ponto de dado real (para a flecha)
         xy_point = (date_at_idx, close_price)
         
+        # Atualiza o marcador (o ponto na linha)
+        self.marker.set_data([date_at_idx], [close_price]) 
+        self.marker.set_visible(True) 
+
         # Atualiza a linha vertical
         self.vert_line.set_xdata(date_at_idx)
         self.vert_line.set_visible(True)
@@ -476,6 +498,108 @@ class MatplotlibWidget(QWidget):
         
         # 5. Redesenha o canvas para mostrar as mudanças
         self.canvas.draw_idle()
+
+# ==========================================================
+# NOVO WIDGET: TREEMAP
+# ==========================================================
+class TreemapWidget(QWidget):
+    """
+    Widget para exibir um mapa de ativos (treemap) usando Matplotlib e squarify.
+    Mostra o tamanho do ativo na carteira e sua variação diária.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        plt.style.use('dark_background')
+        # Ajustei o figsize para garantir que haja espaço para desenhar
+        self.fig = Figure(facecolor='#1A1A1A', figsize=(5, 4)) 
+        self.ax = self.fig.add_subplot(111)
+        self.canvas = FigureCanvas(self.fig)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.addWidget(self.canvas)
+        
+        # Configurações de estilo para Treemap (remove eixos)
+        self.ax.set_xticks([])
+        self.ax.set_yticks([])
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        self.ax.spines['left'].set_visible(False)
+        self.ax.spines['bottom'].set_visible(False)
+        self.ax.set_facecolor('#1A1A1A')
+
+    def plot_treemap(self, data):
+        """
+        Plota o treemap com base nos dados fornecidos.
+        data: Lista de dicionários, cada um com {'Ticker', 'Variação', 'Participação', 'Preco'}
+        """
+        self.ax.clear()
+        self.ax.set_xticks([])
+        self.ax.set_yticks([])
+        self.ax.set_facecolor('#1A1A1A')
+        self.ax.set_title("Composição e Performance da Carteira", color='white', fontsize=12)
+
+        if not data:
+            self.ax.text(0.5, 0.5, "Dados não disponíveis para o Treemap.", 
+                          color='red', fontsize=12, ha='center', transform=self.ax.transAxes)
+            self.canvas.draw()
+            return
+
+        # Prepare os dados para squarify
+        sizes = [d['Participação'] for d in data]
+        labels = []
+        colors = []
+
+        for d in data:
+            # Formatação dos labels
+            ticker = d['Ticker'].replace(".SA", "")
+            variacao = d['Variação']
+            participacao = d['Participação'] * 100
+            preco = d['Preco']
+
+            preco_str = f"R$ {preco:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if preco is not None else "N/A"
+            variacao_str = f"{variacao:+.2f}%"
+
+            labels.append(f"{ticker}\n{preco_str}\n{variacao_str}\n{participacao:.2f}%")
+
+            # Cores
+            if variacao >= 0:
+                colors.append('#228B22') # Verde escuro
+            else:
+                colors.append('#B22222') # Vermelho tijolo
+
+        # Calcula o layout do treemap
+        try:
+            # CORREÇÃO CRÍTICA APLICADA AQUI (Apenas 4 argumentos para squarify.squarify)
+            rects = squarify.squarify(sizes, 0, 0, 100, 100) 
+        except ZeroDivisionError:
+            self.ax.text(0.5, 0.5, "Erro de cálculo: Participação total zero.", 
+                          color='red', fontsize=12, ha='center', transform=self.ax.transAxes)
+            self.canvas.draw()
+            return
+
+        # Plota os retângulos
+        for i, rect in enumerate(rects):
+            x, y, dx, dy = rect['x'], rect['y'], rect['dx'], rect['dy']
+            self.ax.add_patch(plt.Rectangle((x, y), dx, dy, facecolor=colors[i], edgecolor='black', linewidth=1))
+            
+            # Adiciona o texto (ajustando o tamanho da fonte com base no tamanho do bloco)
+            # Fator de ajuste para legibilidade (evita fonte muito grande ou muito pequena)
+            area = dx * dy
+            font_size = min(max(5, int(area / 15)), 10) # Tamanho da fonte ajustável
+            
+            self.ax.text(x + dx / 2, y + dy / 2, labels[i],
+                         ha='center', va='center', color='white',
+                         fontsize=font_size, wrap=True,
+                         bbox=dict(facecolor='black', alpha=0.3, edgecolor='none', boxstyle='round,pad=0.2'))
+        
+        # Ajusta os limites do eixo para garantir que o treemap preencha a área
+        self.ax.set_xlim(0, 100)
+        self.ax.set_ylim(0, 100)
+        self.ax.invert_yaxis() # Inverte o eixo Y para o treemap aparecer de cima para baixo
+
+        self.canvas.draw()
 
 
 class GlobalTickerTape(QWidget):
@@ -516,11 +640,14 @@ class GlobalTickerTape(QWidget):
         
         self.update_data()
         
-    def update_data(self):
+    def update_data(self, tickers_list=None): # Ajuste para permitir que o ticker tape use tickers_list=None
         """ Inicia a busca de dados de Ticker Tape em uma thread. """
+        if tickers_list is None:
+            tickers_list = self.tickers_list
+
         app = QApplication.instance()
         if hasattr(app, 'threadpool'):
-            worker = Worker(buscar_cotacoes_kpis, self.tickers_list)
+            worker = Worker(buscar_cotacoes_kpis, tickers_list)
             worker.signals.result.connect(self.processar_dados_tape)
             app.threadpool.start(worker)
 
@@ -542,7 +669,7 @@ class GlobalTickerTape(QWidget):
                 continue
 
             variacao = data['Variacao']
-            preco_atual = data['Preco'] # <<-- Pegando o preço
+            preco_atual = data['Preco']
             
             if variacao > 0.05:
                 cor = "#76DD76"
@@ -576,15 +703,19 @@ class GlobalTickerTape(QWidget):
                 nome_display = "GÁS NAT."
             else:
                 nome_display = data['Nome'].upper()
-                
+            
+            # --- BLOCO DE FORMATAÇÃO DE VALORES ---
+            # Formata o preço: .0f se > 1000, .2f se < 1000, e ajusta a vírgula/ponto para padrão BR
             if preco_atual > 1000:
                 preco_formatado = f"{preco_atual:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
             else:
                 preco_formatado = f"{preco_atual:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                 
             variacao_formatada = f"{variacao:+.2f}%"
-                
+            
+            # COMBINANDO TUDO na frase: NOME | VALOR | VARIAÇÃO
             frase = f"{nome_display} {preco_formatado} ({variacao_formatada}) {seta}"
+            # ------------------------------------------
             
             label = QLabel(frase)
             label.setStyleSheet(f"color: {cor}; font-weight: bold; font-size: 12px;")
@@ -1054,51 +1185,93 @@ class PortfolioAnalysisTab(QWidget):
         super().__init__()
         self.layout = QHBoxLayout(self)
         
+        # Lado Esquerdo: Input da Carteira e Treemap
+        left_panel = QVBoxLayout()
         self.input_widget = PortfolioInputWidget()
+        left_panel.addWidget(self.input_widget)
+
+        # Treemap Widget
+        self.treemap_widget = TreemapWidget()
+        left_panel.addWidget(QLabel("Mapa de Ativos da Carteira (Participação e Variação)"))
+        left_panel.addWidget(self.treemap_widget, 1) # O treemap ocupará o espaço restante
         
+        self.layout.addLayout(left_panel, 1) # Adiciona o painel esquerdo ao layout principal
+        
+        # Lado Direito: Gráfico de Performance
         self.result_container = QWidget()
         self.result_layout = QVBoxLayout(self.result_container)
         
         self.result_layout.addWidget(QLabel("Gráfico de Performance da Carteira vs. CDI"))
-        # ATENÇÃO: Substituído PlotlyWebView por MatplotlibWidget
         self.graph_view = MatplotlibWidget() 
         self.result_layout.addWidget(self.graph_view, 1)
         
-        self.btn_run = QPushButton("Atualizar gráfico")
+        self.btn_run = QPushButton("Atualizar gráficos") 
         self.btn_run.setStyleSheet("background-color: #7b68ee; color: white; font-size: 14px; padding: 10px;")
         self.btn_run.clicked.connect(self.run_analysis)
         self.result_layout.addWidget(self.btn_run)
         
-        self.layout.addWidget(self.input_widget, 1)
         self.layout.addWidget(self.result_container, 2)
         
-        self.run_analysis() 
+        self.run_analysis() # Roda a análise inicial
 
     def run_analysis(self):
-        """ Inicia a execução do cálculo e plotagem em uma thread. """
+        """ Inicia a execução do cálculo e plotagem em uma thread, incluindo o treemap. """
         portfolio_weights = self.input_widget.get_portfolio() 
         
         if not portfolio_weights:
-            # Mantemos o Matplotlib limpo em caso de erro
             self.graph_view.ax.clear()
             self.graph_view.ax.text(0.5, 0.5, "ERRO: Insira ativos válidos.", 
                                      color='red', fontsize=12, ha='center', transform=self.graph_view.ax.transAxes)
             self.graph_view.canvas.draw()
+            
+            # Limpa também o treemap
+            self.treemap_widget.plot_treemap([]) 
             return
         
-        # Mensagem de carregamento (Matplotlib não permite HTML, usamos o console)
-        print("Calculando portfólio... Aguarde.")
+        print("Calculando portfólio e buscando dados para o treemap... Aguarde.")
 
         app = QApplication.instance()
         if hasattr(app, 'threadpool'):
-            worker = Worker(_calcular_carteira_async, portfolio_weights, DATA_INICIO_PADRAO)
+            # Modifique a chamada do worker para buscar os dados do treemap também
+            worker = Worker(self._perform_portfolio_data_fetch, portfolio_weights, DATA_INICIO_PADRAO)
             worker.signals.result.connect(self.processar_analise)
             app.threadpool.start(worker)
 
-    def processar_analise(self, df_comparison):
-        """ Callback para o Worker: Plota o resultado da análise da carteira. """
-        self.plot_comparison(df_comparison)
+    def _perform_portfolio_data_fetch(self, portfolio_weights, data_inicio):
+        """
+        Função interna que será executada na thread para buscar todos os dados
+        necessários para a aba "Minha Carteira", incluindo o treemap.
+        """
+        # 1. Dados para o gráfico de performance (carteira vs CDI)
+        df_comparison = _calcular_carteira_async(portfolio_weights, data_inicio)
+
+        # 2. Dados para o treemap (preço atual, variação, participação)
+        treemap_data = []
+        tickers = list(portfolio_weights.keys())
+        current_kpis = buscar_cotacoes_kpis(tickers) # Reutiliza a função de KPI
+
+        for ticker, weight in portfolio_weights.items():
+            kpi_info = current_kpis.get(ticker)
+            if kpi_info and kpi_info['Preco'] is not None and kpi_info['Variacao'] is not None:
+                treemap_data.append({
+                    'Ticker': ticker,
+                    'Variação': kpi_info['Variacao'],
+                    'Participação': weight, # weight já é a participação percentual (0 a 1)
+                    'Preco': kpi_info['Preco']
+                })
         
+        # O treemap precisa de dados ordenados para um layout mais estável (opcional)
+        treemap_data.sort(key=lambda x: x['Participação'], reverse=True)
+
+        return df_comparison, treemap_data
+
+    def processar_analise(self, results):
+        """ Callback para o Worker: Plota o resultado da análise da carteira e o treemap. """
+        df_comparison, treemap_data = results
+        self.plot_comparison(df_comparison)
+        self.treemap_widget.plot_treemap(treemap_data) # Atualiza o treemap aqui
+        print("Gráficos da carteira e treemap atualizados na UI com sucesso.")
+
     def plot_comparison(self, df_comparison):
         """ Plota o gráfico de comparação de performance usando Matplotlib. """
         
@@ -1350,7 +1523,7 @@ class TerminalFinanceiroApp(QMainWindow):
         
         self.tab_widget.addTab(tab_dashboard, "1. Dashboard (Visão Geral)")
         self.tab_widget.addTab(tab_detalhes, "2. Detalhes do Ativo") 
-        self.tab_widget.addTab(self.tab_sp500, "3. S&P | 500") 
+        self.tab_widget.addTab(self.tab_sp500, "3. S&P 500 | NASDAQ") 
         self.tab_widget.addTab(self.tab_crypto, "4. Cripto") 
         self.tab_widget.addTab(self.tab_carteira, "5. Minha Carteira") 
         
@@ -1395,7 +1568,7 @@ class TerminalFinanceiroApp(QMainWindow):
         self.execute_async_task(
             fn=buscar_top_performances, 
             callback_result=self.processar_top_movers, 
-            tickers_list=["PETR4.SA", "VALE3.SA", "ITUB4.SA", "BBDC4.SA", "MGLU3.SA", "BBAS3.SA", "AXIA3.SA","B3SA3.SA","SUZB3.SA"]
+            tickers_list=["PETR4.SA", "VALE3.SA", "ITUB4.SA", "BBDC4.SA", "MGLU3.SA", "BBAS3.SA", "AXIA3.SA","B3SA3.SA","SUZB3.SA","BBDC4.SA","SANB11.SA"]
         )
 
     def processar_top_movers(self, df_performance):
@@ -1484,6 +1657,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     
     janela = TerminalFinanceiroApp()
+    
     janela.show()
     
     sys.exit(app.exec())
