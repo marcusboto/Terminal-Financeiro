@@ -7,13 +7,14 @@ import yfinance as yf
 import requests
 from datetime import date
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from matplotlib.figure import Figure
 
 # Imports Matplotlib NATIVOS
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.dates as mdates
+import matplotlib.ticker as ticker 
 
 # IMPORTS PARA TREEMAP (NECESSITA: pip install squarify)
 import squarify
@@ -114,14 +115,15 @@ def _fetch_yfinance_with_retry(fetch_fn, retries=3, delay=1, *args, **kwargs):
                 return None 
     return None
 
-def buscar_dados_historicos(ticker, data_inicio_str):
+def buscar_dados_historicos(ticker, data_inicio_str, interval="1d"):
     """ Busca dados históricos usando yfinance e calcula SMAs. """
     def fetch_data():
         dados = yf.download(
             ticker, 
             start=data_inicio_str, 
             end=date.today().strftime("%Y-%m-%d"), 
-            progress=False
+            progress=False,
+            interval=interval # Adiciona o intervalo aqui
         )
         if isinstance(dados.columns, pd.MultiIndex):
             dados.columns = dados.columns.droplevel(1)
@@ -377,12 +379,49 @@ class MatplotlibWidget(QWidget):
             
         # 1. LÓGICA DE PLOTAGEM
         if ticker == "IBOVESPA":
-            # Estilo Ibovespa: AGORA APENAS LINHA
-            self.ax.plot(df.index, df['Close'], color='#6A5ACD', linewidth=1.5)
-            # self.ax.fill_between(df.index, df['Close'], color='#6A5ACD', alpha=0.3) # <--- REMOVIDO
+            # Estilo Ibovespa: Degradê e Horários (Conforme solicitado)
+            self.ax.plot(df.index, df['Close'], color='#6A5ACD', linewidth=1.5, zorder=2)
+            self.ax.fill_between(df.index, df['Close'], color='#6A5ACD', alpha=0.3, zorder=1) # Degradê
             
             self.ax.set_title(f"Índice Bovespa", color='white', fontsize=12)
             self.ax.set_ylabel('Pontos', color='white', fontsize=10)
+            
+            # --- BLOCO: AJUSTE DINÂMICO DA ESCALA DO EIXO Y (CORREÇÃO DA ESCALA) ---
+            if not df.empty:
+                # Calcula Mínimo e Máximo do preço de fechamento
+                min_price = df['Close'].min()
+                max_price = df['Close'].max()
+                
+                # Adiciona uma pequena margem (ex: 5% da variação total)
+                price_range = max_price - min_price
+                margin = price_range * 0.05 if price_range > 0 else 100 # Garante margem mínima
+                
+                # Aplica o limite ao eixo Y
+                self.ax.set_ylim(min_price - margin, max_price + margin)
+            
+            # --- NOVO BLOCO: FORMATAÇÃO DO EIXO Y COM PONTO MILHAR (BR) ---
+            def millar_formatter(x, pos):
+                # Usa a formatação internacional (com vírgula) e substitui por ponto (BR)
+                # O .split(",")[0] remove o decimal e garante que a saída seja limpa
+                # A substituição de "," por "X" -> "." -> "X" é uma técnica para garantir o ponto de milhar
+                return f'{x:,.0f}'.replace(",", "X").replace(".", ",").replace("X", ".").split(",")[0]
+            
+            custom_formatter = ticker.FuncFormatter(millar_formatter)
+            self.ax.yaxis.set_major_formatter(custom_formatter)
+            # -------------------------------------------------------------
+
+            # --- BLOCO: RESTRIÇÃO E FORMATAÇÃO DO EIXO X (10H ÀS 16H) ---
+            if not df.empty:
+                data_base = df.index[0].date()
+                hora_inicio = datetime.combine(data_base, time(10, 0, 0))
+                hora_fim = datetime.combine(data_base, time(16, 0, 0))
+                self.ax.set_xlim(hora_inicio, hora_fim)
+            
+            # ATENÇÃO: Corrigido o localizador e formatador do Eixo X
+            self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+            self.ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=60)) # Ticks a cada 60 minutos
+            self.fig.autofmt_xdate(rotation=45) # Rotaciona labels para evitar sobreposição
+            
             if self.ax.legend():
                 self.ax.legend().set_visible(False) # Esconde legendas se for Ibovespa
         else:
@@ -399,16 +438,15 @@ class MatplotlibWidget(QWidget):
             self.ax.set_title(f"Preço de Fechamento e Médias Móveis de {ticker}", color='white')
             self.ax.legend(loc='upper left', frameon=False, fontsize=8)
 
+            # Formatação do eixo X (Datas) padrão
+            self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+            self.fig.autofmt_xdate(rotation=45)
         
         # Formatação Comum
         self.ax.set_xlabel("Data") 
         self.ax.set_ylabel("Preço")
 
         self.ax.grid(True, linestyle=':', alpha=0.5, color='#333333')
-        
-        # Formatação do eixo X (Datas)
-        self.ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-        self.fig.autofmt_xdate(rotation=45)
         
         # Garante que as cores personalizadas do Matplotlib sejam aplicadas
         self.ax.tick_params(axis='x', colors='white')
@@ -472,7 +510,11 @@ class MatplotlibWidget(QWidget):
         close_price = self.df_dados['Close'].iloc[idx]
         
         # 3. Formata o texto da anotação
-        date_str = date_at_idx.strftime('%d/%m %H:%M')
+        if self.ticker_name == "IBOVESPA":
+            date_str = date_at_idx.strftime('%d/%m %H:%M') # Formato com hora para Ibovespa
+        else:
+            date_str = date_at_idx.strftime('%Y-%m-%d') # Formato padrão para outros
+
         # Formata o preço com separador de milhar (como no restante do código)
         price_str = f"{close_price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         
@@ -924,9 +966,18 @@ class PerformanceTable(QWidget):
             variacao_str = f"{row['Variação (%)']:+.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             variacao_item = QTableWidgetItem(variacao_str)
             
-            volume_str = f"{row['Volume']:.0f}" if row['Volume'] is not None else "0"
-            volume_item = QTableWidgetItem(volume_str)
+            # --- BLOCO DE FORMATAÇÃO DE VOLUME (CORRIGIDO) ---
+            if row['Volume'] is not None and row['Volume'] > 0:
+                # 1. Formata com vírgula internacional (,) como separador de milhar e 0 decimais
+                volume_str_raw = f"{row['Volume']:,.0f}"
+                # 2. Converte para o padrão BR (usa ponto como milhar)
+                volume_str = volume_str_raw.replace(",", ".")
+            else:
+                volume_str = "0"
             
+            volume_item = QTableWidgetItem(volume_str)
+            # ------------------------------------------
+
             # --- LÓGICA DE COR DA FONTE (FOREGROUND) ---
             if row['Variação (%)'] >= 0:
                 variacao_item.setForeground(QBrush(QColor(118, 221, 118))) 
@@ -1639,12 +1690,23 @@ class TerminalFinanceiroApp(QMainWindow):
             # Símbolo do Ibovespa no Yahoo Finance é "^BVSP"
             ticker_yf = yf.Ticker("^BVSP")
             
-            # Pega dados dos últimos 7 dias com intervalo de 60 minutos
-            dados = ticker_yf.history(period="7d", interval="60m") 
+            # Pega dados do ÚLTIMO DIA com intervalo de 1 minuto (para detalhe intradia)
+            # Alterado o period para '1d' para focar no intradia
+            dados = ticker_yf.history(period="1d", interval="1m") 
             
             if dados.empty:
                 print("Não foi possível carregar dados do Ibovespa.")
                 return
+
+            # --- NOVO BLOCO DE TRATAMENTO DE FUSO HORÁRIO ---
+            if dados.index.tz is not None:
+                # 1. Converte o índice para o fuso horário de Brasília/São Paulo
+                # Certifique-se de que a coluna de data (Index) é tratada como fuso horário
+                dados.index = dados.index.tz_convert('America/Sao_Paulo')
+                # 2. Remove a informação de fuso horário para simplificar a plotagem do Matplotlib
+                dados.index = dados.index.tz_localize(None) 
+            
+            # -----------------------------------------------
 
             # Apenas chama plot_dados, que agora contém toda a lógica de estilização e hover
             self.grafico_ibov_canvas.plot_dados(dados, "IBOVESPA")
