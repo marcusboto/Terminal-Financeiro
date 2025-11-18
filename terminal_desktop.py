@@ -571,7 +571,7 @@ class TreemapWidget(QWidget):
 
         # Calcula o layout do treemap
         try:
-            # CORREÇÃO CRÍTICA APLICADA AQUI (Apenas 4 argumentos para squarify.squarify)
+            # squarify.squarify(sizes, x, y, dx, dy)
             rects = squarify.squarify(sizes, 0, 0, 100, 100) 
         except ZeroDivisionError:
             self.ax.text(0.5, 0.5, "Erro de cálculo: Participação total zero.", 
@@ -1486,10 +1486,13 @@ class TerminalFinanceiroApp(QMainWindow):
         layout_busca_detalhes.addWidget(self.btn_buscar)
         
         layout_busca_detalhes.addStretch(1)
-        layout_detalhes.addLayout(layout_busca_detalhes)
         
+        # 1. Adiciona o CARROSSEL (Commodities Tape) primeiro (INVERTIDO)
         self.commodity_tape = GlobalTickerTape(TICKERS_COMMODITIES)
         layout_detalhes.addWidget(self.commodity_tape) 
+
+        # 2. Adiciona a BARRA DE PESQUISA em seguida (INVERTIDO)
+        layout_detalhes.addLayout(layout_busca_detalhes) 
 
         ativo_graph_container = QWidget()
         ativo_graph_container.setLayout(QVBoxLayout())
@@ -1523,7 +1526,7 @@ class TerminalFinanceiroApp(QMainWindow):
         
         self.tab_widget.addTab(tab_dashboard, "1. Dashboard (Visão Geral)")
         self.tab_widget.addTab(tab_detalhes, "2. Detalhes do Ativo") 
-        self.tab_widget.addTab(self.tab_sp500, "3. S&P 500 | NASDAQ") 
+        self.tab_widget.addTab(self.tab_sp500, "3. S&P | 500") 
         self.tab_widget.addTab(self.tab_crypto, "4. Cripto") 
         self.tab_widget.addTab(self.tab_carteira, "5. Minha Carteira") 
         
